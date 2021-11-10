@@ -1,4 +1,4 @@
-from pipeline import reso,stack,pupil,treadmill
+from pipeline import meso,stack,pupil,treadmill
 from stimulus import stimulus
 from stimline import tune
 from tqdm import tqdm
@@ -27,7 +27,7 @@ params = dict(skip_duplicates=True,ignore_extra_fields=True)
 
 ##TODO: ADD MESO
 ##TODO: include in scan table label of type of scan
-## animal_id = 21617
+## animal_id = 9161
 
 @schema
 class Scan(dj.Manual):
@@ -49,7 +49,7 @@ class Scan(dj.Manual):
         
     @property
     def key_source(self):
-        return (reso.ScanInfo & self.scan_keys).proj('nframes','nfields','fps')
+        return (meso.ScanInfo & self.scan_keys).proj('nframes','nfields','fps')
     
     @classmethod
     def fill(cls):
@@ -77,8 +77,8 @@ class Field(dj.Manual):
       
     @property
     def key_source(self):
-        return ((reso.ScanInfo & Scan.proj() & {'animal_id':8973}) * \
-                    reso.ScanInfo.Field).proj('px_width','px_height','um_width','um_height',
+        return ((meso.ScanInfo & Scan.proj() & {'animal_id':9161}) * \
+                    meso.ScanInfo.Field).proj('px_width','px_height','um_width','um_height',
                                               field_x='x',field_y='y',field_z='z')
     
     @classmethod
@@ -245,7 +245,7 @@ class FrameTimes(dj.Manual):
     def fill(cls):
         for key in cls.key_source:
             frame_times = (stimulus.BehaviorSync() & key).fetch('frame_times')[0]
-            ndepths = len(dj.U('z') &  (reso.ScanInfo().Field() & key))
+            ndepths = len(dj.U('z') &  (meso.ScanInfo().Field() & key))
             cls.insert1({**key,'frame_times':frame_times - frame_times[0],'ndepths':ndepths},**params)
 
 #TODO: only 1 field per depth, 10 depths, bigger diff on frame times
@@ -272,7 +272,7 @@ class Stimulus(dj.Manual):
             full_stimulus = None
             full_flips = None
 
-            num_depths = np.unique((reso.ScanInfo.Field & key).fetch('z')).shape[0]
+            num_depths = np.unique((meso.ScanInfo.Field & key).fetch('z')).shape[0]
             scan_times = (stimulus.Sync & key).fetch1('frame_times').squeeze()[::num_depths]
             target_hz = 1/np.median(np.diff(scan_times))
             trial_data = ((stimulus.Trial & key) * stimulus.Condition).fetch('KEY', 'stimulus_type', order_by='trial_idx ASC')
@@ -358,7 +358,7 @@ class Trial(dj.Manual):
     def fill(cls):
         for key in cls.key_source:
             data = ((stimulus.Trial() & key) * stimulus.Condition()).fetch(as_dict=True)
-            ndepths = len(dj.U('z') & (reso.ScanInfo().Field() & key))
+            ndepths = len(dj.U('z') & (meso.ScanInfo().Field() & key))
 
             offset = get_timing_offset(key)
             frame_times = (stimulus.Sync() & key).fetch1('frame_times')
@@ -425,7 +425,7 @@ class Monet(dj.Manual):
     
     @property
     def key_source(self):
-        return stimulus.Monet & (stimulus.Trial & {'animal_id':8973} & Scan)
+        return stimulus.Monet & (stimulus.Trial & {'animal_id':9161} & Scan)
 
     @classmethod
     def fill(cls):
@@ -449,7 +449,7 @@ class MeanIntensity(dj.Manual):
     
     @property
     def key_source(self):
-        return reso.Quality.MeanIntensity & {'animal_id':8973,'channel':1} & Scan
+        return meso.Quality.MeanIntensity & {'animal_id':9161,'channel':1} & Scan
     
     @classmethod
     def fill(cls):
@@ -470,8 +470,8 @@ class SummaryImages(dj.Manual):
     
     @property
     def key_source(self):
-        return reso.SummaryImages.Correlation.proj(correlation='correlation_image') * \
-               reso.SummaryImages.Average.proj(average='average_image') & {'animal_id': 8973} & Scan
+        return meso.SummaryImages.Correlation.proj(correlation='correlation_image') * \
+               meso.SummaryImages.Average.proj(average='average_image') & {'animal_id':9161} & Scan
     
     @classmethod
     def fill(cls):
@@ -538,7 +538,7 @@ class Registration(dj.Manual):
     @property
     def key_source(self):
         fetch_str = stack.Registration.Affine.heading.secondary_attributes
-        return stack.Registration.Affine.proj(*fetch_str,session='scan_session') & {'animal_id':8973} & Stack & Field
+        return stack.Registration.Affine.proj(*fetch_str,session='scan_session') & {'animal_id':9161} & Stack & Field
     
     @classmethod
     def fill(cls):
@@ -587,11 +587,11 @@ class Segmentation(dj.Manual):
     weights         : longblob      # weights of the mask at the indices above
     """
     
-    segmentation_key = {'animal_id': 8973, 'segmentation_method': 6}
+    segmentation_key = {'animal_id':9161, 'segmentation_method': 6}
 
     @property
     def key_source(self):
-        return reso.Segmentation.Mask & self.segmentation_key & Field
+        return meso.Segmentation.Mask & self.segmentation_key & Field
 
     @classmethod
     def fill(cls):
@@ -610,11 +610,11 @@ class Fluorescence(dj.Manual):
     trace                   : longblob #fluorescence trace 
     """
     
-    segmentation_key = {'animal_id': 8973, 'segmentation_method': 6}
+    segmentation_key = {'animal_id':9161, 'segmentation_method': 6}
 
     @property
     def key_source(self):
-        return reso.Fluorescence.Trace & self.segmentation_key & Field
+        return meso.Fluorescence.Trace & self.segmentation_key & Field
     
     @classmethod
     def fill(cls):
@@ -640,12 +640,12 @@ class ScanUnit(dj.Manual):
     ms_delay            : smallint      # delay from start of frame (field 1 pixel 1) to recording ot his unit (milliseconds)
     """
     
-    segmentation_key = {'animal_id': 8973, 'segmentation_method': 6}
+    segmentation_key = {'animal_id':9161, 'segmentation_method': 6}
 
     
     @property
     def key_source(self):
-        return (reso.ScanSet.Unit * reso.ScanSet.UnitInfo) & self.segmentation_key & Field  
+        return (meso.ScanSet.Unit * meso.ScanSet.UnitInfo) & self.segmentation_key & Field  
     
     @classmethod
     def fill(cls):
@@ -663,11 +663,11 @@ class Activity(dj.Manual):
     trace                   : longblob  #spike trace
     """
     
-    segmentation_key = {'animal_id': 8973, 'segmentation_method': 6, 'spike_method': 5}
+    segmentation_key = {'animal_id':9161, 'segmentation_method': 6, 'spike_method': 5}
 
     @property
     def key_source(self):
-        return reso.Activity.Trace & self.segmentation_key & Field
+        return meso.Activity.Trace & self.segmentation_key & Field
 
     
     @classmethod
@@ -692,11 +692,11 @@ class StackUnit(dj.Manual):
     stack_z            : float    # centroid z stack coordinates (microns)
     """
     
-    segmentation_key = {'animal_id': 8973, 'segmentation_method': 6}
+    segmentation_key = {'animal_id':9161, 'segmentation_method': 6}
     
     @property
     def key_source(self):
-        return reso.StackCoordinates.UnitInfo & self.segmentation_key & Stack.proj() & Field
+        return meso.StackCoordinates.UnitInfo & self.segmentation_key & Stack.proj() & Field
 
     
     @classmethod
@@ -740,7 +740,7 @@ class MaskClassification(dj.Manual):
 
     @property
     def key_source(self):
-        return reso.MaskClassification.Type.proj(mask_type='type') & {'animal_id': 8973, 'segmentation_method': 6} & Scan
+        return meso.MaskClassification.Type.proj(mask_type='type') & {'animal_id':9161, 'segmentation_method': 6} & Scan
 
     @classmethod
     def fill(cls):
@@ -759,7 +759,7 @@ class Oracle(dj.Manual):
     trials               : int                          # number of trials used
     pearson              : float                        # per unit oracle pearson correlation over all movies
     """
-    segmentation_key = {'animal_id': 8973, 'segmentation_method': 6, 'spike_method': 5}
+    segmentation_key = {'animal_id':9161, 'segmentation_method': 6, 'spike_method': 5}
     
     @property
     def key_source(self):
