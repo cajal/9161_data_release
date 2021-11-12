@@ -9,7 +9,7 @@ schema classes and methods
 import numpy as np
 import datajoint as dj
 
-schema = dj.schema('microns_L23_nda', create_tables=True)
+schema = dj.schema('basil_nda', create_tables=True)
 schema.spawn_missing_classes()
 
 import coregister.solve as cs
@@ -431,8 +431,103 @@ class Monet(dj.Manual):
     def fill(cls):
         cls.insert(cls.key_source, **params)
 
-##TODO: add Trippy
-##TODO: add Clip
+@schema
+class Trippy(dj.Manual):
+    definition = """
+    # randomized curvy dynamic gratings
+    condition_hash       : char(20)                     # 120-bit hash (The first 20 chars of MD5 in base64)
+    ---
+    fps                  : decimal(6,3)                 # display refresh rate (Hz)
+    rng_seed             : double                       # random number generate seed
+    packed_phase_movie   : longblob                     # phase movie before spatial and temporal interpolation
+    tex_ydim             : smallint                     # (pixels) texture height
+    tex_xdim             : smallint                     # (pixels) texture width
+    duration             : float                        # (s) trial duration
+    xnodes               : tinyint                      # x dimension of low-res phase movie
+    ynodes               : tinyint                      # y dimension of low-res phase movie
+    up_factor            : tinyint                      # spatial upscale factor
+    temp_freq            : float                        # (Hz) temporal frequency if the phase pattern were static
+    temp_kernel_length   : smallint                     # length of Hanning kernel used for temporal filter. Controls the rate of change of the phase pattern.
+    spatial_freq         : float                        # (cy/point) approximate max. The actual frequencies may be higher.
+    movie                : longblob                     # rendered movie (H X W X T)
+    """
+    @property 
+    def key_source(cls):
+        return (stimulus.Trial().proj('condition_hash') * stimulus.Trippy & Scan().platinum_scans) 
+
+    @classmethod
+    def fill(cls):
+        cls.insert(cls.key_source,**params)
+
+@schema
+class Clip(dj.Manual):
+    definition = """
+    # Movie clip condition
+    condition_hash       : char(20)                     # 120-bit hash (The first 20 chars of MD5 in base64)
+    ---
+    movie_name           : char(250)                    # full clip source
+    duration             : decimal(7,3)                 # duration of clip (seconds)
+    clip                 : longblob                     # clip used for stimulus (T x H x W)
+    short_movie_name     : char(15)                     # clip type (cinematic, sports1m, rendered)
+    fps                  : float                        # original framerate of clip
+    """
+
+    @property 
+    def key_source(cls):
+        return Scan().platinum_scans
+    @classmethod
+    def fill(cls):
+        for key in cls.key_source:
+            movie_mapping = {
+                'poqatsi':"Cinematic",
+                'MadMax':   "Cinematic",
+                'naqatsi':  "Cinematic",
+                'koyqatsi': "Cinematic",
+                'matrixrv': "Cinematic",
+                'starwars': "Cinematic",
+                'matrixrl': "Cinematic",
+                'matrix':   "Cinematic",
+            }
+
+            long_movie_mapping = {
+                'poqatsi':  "Powaqqatsi: Life in Transformation (1988)",
+                'MadMax':   "Mad Max: Fury Road (2015)",
+                'naqatsi':  "Naqoyqatsi: Life as War (2002)",
+                'koyqatsi': "Koyaanisqatsi: Life Out of Balance (1982)",
+                'matrixrv': "The Matrix Revolutions (2003)",
+                'starwars': "Star Wars: Episode VII - The Force Awakens (2015)",
+                'matrixrl': "The Matrix Reloaded (2003)",
+                'matrix':   "The Matrix (1999)"}
+
+            short_mapping = {'bigrun':'Rendered','finalrun':'Rendered','sports1m':'sports1m'}
+            short_mapping = {**short_mapping,**movie_mapping}
+            trials = stimulus.Trial() & key 
+            movie_df = (trials.proj('condition_hash') * stimulus.Movie().Clip() * stimulus.Clip() * stimulus.Movie()).fetch(format='frame')
+            movie_df = movie_df.reset_index()
+            movie_df['new_movie_name'] = movie_df.apply(lambda x: x['parent_file_name'][:-4],axis=1)
+            movie_df['new_movie_name'] = movie_df.apply(lambda x: x['new_movie_name'] if x['movie_name'] not in long_movie_mapping else long_movie_mapping[x['movie_name']],axis=1)
+            for entry in movie_df.to_dict('records'): 
+                clip, skip_time, cut_after, hz = entry['clip'],entry['skip_time'],entry['cut_after'],entry['frame_rate']
+                
+                vid = imageio.get_reader(io.BytesIO(clip.tobytes()), 'ffmpeg')
+                _hz = 30
+                frames = np.stack([frame.mean(axis=-1) for frame in vid], 0)
+                total_frames = frames.shape[0]
+                skip_time, cut_after = float(skip_time), float(cut_after)
+                _start_frame = round(skip_time * _hz)
+                _end_frame = _start_frame + round(cut_after * _hz)
+                start_frame = min(math.ceil(_start_frame / _hz * hz), total_frames)
+                end_frame = min(math.floor(_end_frame / _hz * hz), total_frames)
+                cut_clip = frames[start_frame:end_frame,:,:]
+                movie_name = movie_df[lambda df: df['condition_hash'] == entry['condition_hash']]['new_movie_name'].iloc[0]
+                pack = {'condition_hash':entry['condition_hash'],
+                        'movie_name':movie_name,
+                        'duration':entry['cut_after'],
+                        'clip_number':entry['clip_number'],
+                        'clip':cut_clip,
+                        'short_movie_name':short_mapping[entry['movie_name']],
+                        'fps':entry['frame_rate']}
+                cls.insert1(pack,**params)
 
 
 @schema
